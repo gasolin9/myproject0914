@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import './styles/globals.css';
 
-// 타입 정의
+// 확장된 타입 정의
 interface Student {
   id: number;
   number: number;
   name: string;
   class: string;
+  transferInDate?: string;  // 전입일 (YYYY-MM-DD)
+  transferOutDate?: string; // 전출일 (YYYY-MM-DD)
 }
 
 interface AttendanceRecord {
@@ -14,14 +16,18 @@ interface AttendanceRecord {
   studentId: number;
   date: string;
   status: '출석' | '지각' | '조퇴' | '결석';
+  subStatus?: '체험' | '병결' | '기타'; // 결석 세부 사유
+  period?: number; // 지각/조퇴 교시 (1-6)
   note?: string;
 }
 
 export default function App() {
   const [currentPage, setCurrentPage] = useState<'dashboard' | 'students' | 'settings'>('dashboard');
   const [isQuickPanelOpen, setIsQuickPanelOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [selectedStudent, setSelectedStudent] = useState<number | null>(null);
 
-  // 데이터 상태
+  // 데이터 상태 (실제 학교 상황 반영)
   const [students, setStudents] = useState<Student[]>([
     { id: 1, number: 1, name: '김가은', class: '6-8' },
     { id: 2, number: 2, name: '박도윤', class: '6-8' },
@@ -30,21 +36,96 @@ export default function App() {
     { id: 5, number: 15, name: '송지민', class: '6-8' },
     { id: 6, number: 23, name: '남도현', class: '6-8' },
     { id: 7, number: 28, name: '노예진', class: '6-8' },
+    // 전입/전출 예시 학생
+    { id: 8, number: 5, name: '이하늘', class: '6-8', transferInDate: '2025-09-10' },
+    { id: 9, number: 12, name: '정민수', class: '6-8', transferOutDate: '2025-09-12' },
   ]);
 
-  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>([
-    { id: 1, studentId: 1, date: '2025-09-14', status: '출석' },
-    { id: 2, studentId: 2, date: '2025-09-14', status: '지각', note: '버스 지연' },
-    { id: 3, studentId: 3, date: '2025-09-14', status: '출석' },
-    { id: 4, studentId: 4, date: '2025-09-14', status: '조퇴', note: '병원 진료' },
-    { id: 5, studentId: 5, date: '2025-09-14', status: '결석', note: '감기몸살' },
-    { id: 6, studentId: 6, date: '2025-09-14', status: '출석' },
-    { id: 7, studentId: 7, date: '2025-09-14', status: '출석' },
-  ]);
+  // 여러 날짜의 출결 기록 (어제, 오늘 데이터)
+  const [attendanceRecords, setAttendanceRecords] = useState<AttendanceRecord[]>(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
 
-  const [newStudent, setNewStudent] = useState({ number: '', name: '', class: '6-8' });
+    const records: AttendanceRecord[] = [];
 
-  // 실제 기능 함수들
+    // 어제 데이터
+    students.forEach(student => {
+      records.push({
+        id: Date.now() + Math.random(),
+        studentId: student.id,
+        date: yesterday,
+        status: '출석' // 기본값 출석
+      });
+    });
+
+    // 오늘 데이터 (일부만 입력된 상황)
+    records.push(
+      { id: Date.now() + Math.random(), studentId: 2, date: today, status: '지각', period: 2, note: '버스 지연' },
+      { id: Date.now() + Math.random(), studentId: 4, date: today, status: '조퇴', period: 4, note: '병원 진료' },
+      { id: Date.now() + Math.random(), studentId: 5, date: today, status: '결석', subStatus: '병결', note: '감기' }
+    );
+
+    return records;
+  });
+
+  const [newStudent, setNewStudent] = useState({ number: '', name: '', class: '6-8', transferDate: '', transferType: 'in' as 'in' | 'out' });
+
+  // 날짜 관련 함수들
+  const changeDate = (days: number) => {
+    const currentDate = new Date(selectedDate);
+    currentDate.setDate(currentDate.getDate() + days);
+    setSelectedDate(currentDate.toISOString().split('T')[0]);
+  };
+
+  const getDateString = (date: string) => {
+    const d = new Date(date);
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+    if (date === today) return `${date} (오늘)`;
+    if (date === yesterday) return `${date} (어제)`;
+    return date;
+  };
+
+  // 전입/전출 관련 함수들
+  const getActiveStudentsForDate = (date: string) => {
+    return students.filter(student => {
+      // 전입일 체크: 전입일이 없거나 선택한 날짜보다 이전이어야 함
+      const transferInOk = !student.transferInDate || student.transferInDate <= date;
+      // 전출일 체크: 전출일이 없거나 선택한 날짜보다 이후여야 함
+      const transferOutOk = !student.transferOutDate || student.transferOutDate > date;
+
+      return transferInOk && transferOutOk;
+    });
+  };
+
+  const getStudentStatusForDate = (studentId: number, date: string) => {
+    const record = attendanceRecords.find(r => r.studentId === studentId && r.date === date);
+    const student = students.find(s => s.id === studentId);
+
+    // 전입/전출 상태 체크
+    if (student?.transferInDate === date) {
+      return `전입 (${date})`;
+    }
+    if (student?.transferOutDate === date) {
+      return `전출 (${date})`;
+    }
+
+    return record ? formatAttendanceStatus(record) : '출석'; // 기본값 출석
+  };
+
+  const formatAttendanceStatus = (record: AttendanceRecord) => {
+    let status = record.status;
+    if (record.status === '결석' && record.subStatus) {
+      status = record.subStatus;
+    }
+    if (record.period && (record.status === '지각' || record.status === '조퇴')) {
+      status += ` (${record.period}교시)`;
+    }
+    return status;
+  };
+
+  // 학생 관리 함수들
   const addStudent = () => {
     if (newStudent.name && newStudent.number) {
       const student: Student = {
@@ -53,8 +134,18 @@ export default function App() {
         name: newStudent.name,
         class: newStudent.class
       };
+
+      // 전입/전출 날짜 설정
+      if (newStudent.transferDate) {
+        if (newStudent.transferType === 'in') {
+          student.transferInDate = newStudent.transferDate;
+        } else {
+          student.transferOutDate = newStudent.transferDate;
+        }
+      }
+
       setStudents([...students, student]);
-      setNewStudent({ number: '', name: '', class: '6-8' });
+      setNewStudent({ number: '', name: '', class: '6-8', transferDate: '', transferType: 'in' });
     }
   };
 
@@ -65,43 +156,55 @@ export default function App() {
     }
   };
 
-  const recordAttendance = (studentId: number, status: '출석' | '지각' | '조퇴' | '결석') => {
-    const today = new Date().toISOString().split('T')[0];
-    const existingRecord = attendanceRecords.find(r => r.studentId === studentId && r.date === today);
+  // 출결 기록 함수들
+  const recordAttendance = (studentId: number, status: '출석' | '지각' | '조퇴' | '결석', options?: { subStatus?: '체험' | '병결' | '기타', period?: number, note?: string }) => {
+    const existingRecord = attendanceRecords.find(r => r.studentId === studentId && r.date === selectedDate);
+
+    const newRecord: AttendanceRecord = {
+      id: existingRecord?.id || Date.now(),
+      studentId,
+      date: selectedDate,
+      status,
+      ...options
+    };
 
     if (existingRecord) {
       setAttendanceRecords(attendanceRecords.map(r =>
-        r.id === existingRecord.id ? { ...r, status } : r
+        r.id === existingRecord.id ? newRecord : r
       ));
     } else {
-      const newRecord: AttendanceRecord = {
-        id: Date.now(),
-        studentId,
-        date: today,
-        status
-      };
       setAttendanceRecords([...attendanceRecords, newRecord]);
     }
-    setIsQuickPanelOpen(false);
-  };
-
-  const getStudentTodayStatus = (studentId: number) => {
-    const today = new Date().toISOString().split('T')[0];
-    const record = attendanceRecords.find(r => r.studentId === studentId && r.date === today);
-    return record?.status || '미등록';
   };
 
   const getAttendanceStats = () => {
-    const today = new Date().toISOString().split('T')[0];
-    const todayRecords = attendanceRecords.filter(r => r.date === today);
+    const activeStudents = getActiveStudentsForDate(selectedDate);
+    const dateRecords = attendanceRecords.filter(r => r.date === selectedDate);
 
-    return {
-      출석: todayRecords.filter(r => r.status === '출석').length,
-      지각: todayRecords.filter(r => r.status === '지각').length,
-      조퇴: todayRecords.filter(r => r.status === '조퇴').length,
-      결석: todayRecords.filter(r => r.status === '결석').length,
-      미등록: students.length - todayRecords.length
+    const stats = {
+      출석: 0,
+      지각: 0,
+      조퇴: 0,
+      결석: 0,
+      체험: 0,
+      병결: 0,
+      기타: 0
     };
+
+    activeStudents.forEach(student => {
+      const record = dateRecords.find(r => r.studentId === student.id);
+      if (record) {
+        if (record.status === '결석' && record.subStatus) {
+          stats[record.subStatus]++;
+        } else {
+          stats[record.status]++;
+        }
+      } else {
+        stats.출석++; // 기본값 출석
+      }
+    });
+
+    return stats;
   };
 
   // 전역 단축키 설정
@@ -122,60 +225,123 @@ export default function App() {
   }, []);
 
   const stats = getAttendanceStats();
+  const activeStudents = getActiveStudentsForDate(selectedDate);
 
   // 페이지 렌더링
   const renderDashboard = () => (
     <div style={{ padding: '2rem' }}>
-      <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '2rem' }}>📊 대시보드</h2>
+      {/* 날짜 선택 헤더 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: 0 }}>📊 출결 대시보드</h2>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <button
+            onClick={() => changeDate(-1)}
+            style={{
+              padding: '0.5rem 1rem',
+              borderRadius: '4px',
+              border: '1px solid #d1d5db',
+              backgroundColor: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            ← 어제
+          </button>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              style={{
+                padding: '0.5rem',
+                border: '1px solid #d1d5db',
+                borderRadius: '4px'
+              }}
+            />
+            <span style={{ color: '#666', fontSize: '0.875rem' }}>
+              {getDateString(selectedDate)}
+            </span>
+          </div>
+          <button
+            onClick={() => changeDate(1)}
+            style={{
+              padding: '0.5rem 1rem',
+              borderRadius: '4px',
+              border: '1px solid #d1d5db',
+              backgroundColor: 'white',
+              cursor: 'pointer'
+            }}
+          >
+            내일 →
+          </button>
+        </div>
+      </div>
 
-      {/* 오늘 출결 현황 */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+      {/* 출결 통계 카드들 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
         {[
           { label: '출석', count: stats.출석, color: '#10b981', icon: '✓' },
           { label: '지각', count: stats.지각, color: '#f59e0b', icon: '⏰' },
           { label: '조퇴', count: stats.조퇴, color: '#f97316', icon: '🏃' },
-          { label: '결석', count: stats.결석, color: '#ef4444', icon: '✗' },
-          { label: '미등록', count: stats.미등록, color: '#6b7280', icon: '❓' }
+          { label: '체험', count: stats.체험, color: '#8b5cf6', icon: '🎓' },
+          { label: '병결', count: stats.병결, color: '#ef4444', icon: '🏥' },
+          { label: '기타', count: stats.기타, color: '#6b7280', icon: '❓' }
         ].map((item) => (
           <div key={item.label} style={{
             backgroundColor: 'white',
             borderRadius: '8px',
-            padding: '1.5rem',
-            border: '1px solid #e5e7eb'
+            padding: '1rem',
+            border: '1px solid #e5e7eb',
+            textAlign: 'center'
           }}>
             <div style={{
-              width: '3rem',
-              height: '3rem',
+              width: '2.5rem',
+              height: '2.5rem',
               backgroundColor: item.color,
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: 'white',
-              fontSize: '1.25rem',
-              marginBottom: '0.75rem'
+              fontSize: '1rem',
+              margin: '0 auto 0.5rem'
             }}>
               {item.icon}
             </div>
-            <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#111' }}>{item.count}명</div>
-            <div style={{ color: '#666' }}>{item.label}</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#111' }}>{item.count}명</div>
+            <div style={{ color: '#666', fontSize: '0.875rem' }}>{item.label}</div>
           </div>
         ))}
       </div>
 
       {/* 학생별 출결 현황 */}
       <div style={{ backgroundColor: 'white', borderRadius: '8px', padding: '1.5rem', border: '1px solid #e5e7eb' }}>
-        <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>오늘 학생별 출결 현황</h3>
+        <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>
+          {getDateString(selectedDate)} 학생별 출결 현황 ({activeStudents.length}명)
+        </h3>
         <div style={{ display: 'grid', gap: '0.5rem' }}>
-          {students.map(student => {
-            const status = getStudentTodayStatus(student.id);
+          {activeStudents.map(student => {
+            const status = getStudentStatusForDate(student.id, selectedDate);
             const statusColors = {
               '출석': '#10b981',
               '지각': '#f59e0b',
               '조퇴': '#f97316',
-              '결석': '#ef4444',
-              '미등록': '#6b7280'
+              '체험': '#8b5cf6',
+              '병결': '#ef4444',
+              '기타': '#6b7280'
             };
+
+            // 전입/전출 표시
+            let statusDisplay = status;
+            let statusColor = statusColors[status.split(' ')[0] as keyof typeof statusColors] || '#10b981';
+
+            if (status.includes('전입') || status.includes('전출')) {
+              statusColor = '#3b82f6';
+            }
+
             return (
               <div key={student.id} style={{
                 display: 'flex',
@@ -185,15 +351,27 @@ export default function App() {
                 backgroundColor: '#f9fafb',
                 borderRadius: '4px'
               }}>
-                <span>{student.number}번 {student.name}</span>
+                <div>
+                  <span style={{ fontWeight: '600' }}>{student.number}번 {student.name}</span>
+                  {student.transferInDate && (
+                    <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#3b82f6' }}>
+                      (전입: {student.transferInDate})
+                    </span>
+                  )}
+                  {student.transferOutDate && (
+                    <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#ef4444' }}>
+                      (전출: {student.transferOutDate})
+                    </span>
+                  )}
+                </div>
                 <span style={{
                   padding: '0.25rem 0.75rem',
                   borderRadius: '4px',
-                  backgroundColor: statusColors[status as keyof typeof statusColors] || '#6b7280',
+                  backgroundColor: statusColor,
                   color: 'white',
                   fontSize: '0.875rem'
                 }}>
-                  {status}
+                  {statusDisplay}
                 </span>
               </div>
             );
@@ -210,7 +388,7 @@ export default function App() {
       {/* 학생 추가 폼 */}
       <div style={{ backgroundColor: 'white', borderRadius: '8px', padding: '1.5rem', marginBottom: '2rem', border: '1px solid #e5e7eb' }}>
         <h3 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>새 학생 추가</h3>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'end' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '1rem', alignItems: 'end' }}>
           <div>
             <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', marginBottom: '0.25rem' }}>번호</label>
             <input
@@ -218,7 +396,7 @@ export default function App() {
               value={newStudent.number}
               onChange={(e) => setNewStudent({ ...newStudent, number: e.target.value })}
               placeholder="번호"
-              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '80px' }}
+              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
             />
           </div>
           <div>
@@ -228,7 +406,7 @@ export default function App() {
               value={newStudent.name}
               onChange={(e) => setNewStudent({ ...newStudent, name: e.target.value })}
               placeholder="학생 이름"
-              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '150px' }}
+              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
             />
           </div>
           <div>
@@ -238,7 +416,27 @@ export default function App() {
               value={newStudent.class}
               onChange={(e) => setNewStudent({ ...newStudent, class: e.target.value })}
               placeholder="학급"
-              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '80px' }}
+              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', marginBottom: '0.25rem' }}>전입/전출</label>
+            <select
+              value={newStudent.transferType}
+              onChange={(e) => setNewStudent({ ...newStudent, transferType: e.target.value as 'in' | 'out' })}
+              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
+            >
+              <option value="in">전입</option>
+              <option value="out">전출</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: '500', marginBottom: '0.25rem' }}>날짜 (선택)</label>
+            <input
+              type="date"
+              value={newStudent.transferDate}
+              onChange={(e) => setNewStudent({ ...newStudent, transferDate: e.target.value })}
+              style={{ padding: '0.5rem', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%' }}
             />
           </div>
           <button
@@ -249,7 +447,8 @@ export default function App() {
               padding: '0.5rem 1rem',
               borderRadius: '4px',
               border: 'none',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              height: 'fit-content'
             }}
           >
             추가
@@ -351,43 +550,176 @@ export default function App() {
               </button>
             </div>
 
-            <div style={{ display: 'grid', gap: '1rem' }}>
-              {students.map(student => {
-                const currentStatus = getStudentTodayStatus(student.id);
+            <div style={{ display: 'grid', gap: '1rem', maxHeight: '60vh', overflowY: 'auto' }}>
+              {activeStudents.map(student => {
+                const currentStatus = getStudentStatusForDate(student.id, selectedDate);
+                const isSelected = selectedStudent === student.id;
+
                 return (
                   <div key={student.id} style={{
                     padding: '1rem',
-                    backgroundColor: '#f9fafb',
+                    backgroundColor: isSelected ? '#dbeafe' : '#f9fafb',
                     borderRadius: '8px',
-                    border: '1px solid #e5e7eb'
+                    border: isSelected ? '2px solid #2563eb' : '1px solid #e5e7eb'
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                       <span style={{ fontWeight: '600' }}>{student.number}번 {student.name}</span>
                       <span style={{ fontSize: '0.875rem', color: '#666' }}>현재: {currentStatus}</span>
                     </div>
-                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                      {(['출석', '지각', '조퇴', '결석'] as const).map(status => (
-                        <button
-                          key={status}
-                          onClick={() => recordAttendance(student.id, status)}
-                          style={{
-                            padding: '0.5rem 1rem',
-                            borderRadius: '4px',
-                            border: 'none',
-                            cursor: 'pointer',
-                            fontSize: '0.875rem',
-                            backgroundColor:
-                              status === '출석' ? '#10b981' :
-                              status === '지각' ? '#f59e0b' :
-                              status === '조퇴' ? '#f97316' : '#ef4444',
-                            color: 'white',
-                            opacity: currentStatus === status ? 1 : 0.7
-                          }}
-                        >
-                          {status}
-                        </button>
-                      ))}
+
+                    {/* 기본 출결 버튼들 */}
+                    <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                      <button
+                        onClick={() => recordAttendance(student.id, '출석')}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: '0.875rem',
+                          backgroundColor: '#10b981',
+                          color: 'white',
+                          opacity: currentStatus === '출석' ? 1 : 0.7
+                        }}
+                      >
+                        출석
+                      </button>
+
+                      <button
+                        onClick={() => setSelectedStudent(selectedStudent === student.id ? null : student.id)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: '0.875rem',
+                          backgroundColor: '#f59e0b',
+                          color: 'white'
+                        }}
+                      >
+                        지각 (교시선택)
+                      </button>
+
+                      <button
+                        onClick={() => setSelectedStudent(selectedStudent === student.id ? null : student.id)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: '0.875rem',
+                          backgroundColor: '#f97316',
+                          color: 'white'
+                        }}
+                      >
+                        조퇴 (교시선택)
+                      </button>
+
+                      <button
+                        onClick={() => setSelectedStudent(selectedStudent === student.id ? null : student.id)}
+                        style={{
+                          padding: '0.5rem 1rem',
+                          borderRadius: '4px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          fontSize: '0.875rem',
+                          backgroundColor: '#ef4444',
+                          color: 'white'
+                        }}
+                      >
+                        결석 (사유선택)
+                      </button>
                     </div>
+
+                    {/* 세부 선택 옵션들 */}
+                    {isSelected && (
+                      <div style={{
+                        padding: '1rem',
+                        backgroundColor: 'white',
+                        borderRadius: '4px',
+                        border: '1px solid #e5e7eb',
+                        marginTop: '0.5rem'
+                      }}>
+                        {/* 지각/조퇴 교시 선택 */}
+                        <div style={{ marginBottom: '1rem' }}>
+                          <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem', fontWeight: '600' }}>교시 선택 (지각/조퇴):</h4>
+                          <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+                            {[1, 2, 3, 4, 5, 6].map(period => (
+                              <button
+                                key={period}
+                                onClick={() => {
+                                  // 지각 또는 조퇴를 마지막으로 클릭한 상태에 따라 결정
+                                  recordAttendance(student.id, '지각', { period });
+                                  setSelectedStudent(null);
+                                }}
+                                style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '4px',
+                                  border: '1px solid #f59e0b',
+                                  backgroundColor: 'white',
+                                  color: '#f59e0b',
+                                  cursor: 'pointer',
+                                  fontSize: '0.75rem'
+                                }}
+                              >
+                                {period}교시 지각
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                            {[1, 2, 3, 4, 5, 6].map(period => (
+                              <button
+                                key={period}
+                                onClick={() => {
+                                  recordAttendance(student.id, '조퇴', { period });
+                                  setSelectedStudent(null);
+                                }}
+                                style={{
+                                  padding: '0.25rem 0.5rem',
+                                  borderRadius: '4px',
+                                  border: '1px solid #f97316',
+                                  backgroundColor: 'white',
+                                  color: '#f97316',
+                                  cursor: 'pointer',
+                                  fontSize: '0.75rem'
+                                }}
+                              >
+                                {period}교시 조퇴
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* 결석 사유 선택 */}
+                        <div>
+                          <h4 style={{ margin: '0 0 0.5rem 0', fontSize: '0.875rem', fontWeight: '600' }}>결석 사유:</h4>
+                          <div style={{ display: 'flex', gap: '0.5rem' }}>
+                            {(['체험', '병결', '기타'] as const).map(subStatus => (
+                              <button
+                                key={subStatus}
+                                onClick={() => {
+                                  recordAttendance(student.id, '결석', { subStatus });
+                                  setSelectedStudent(null);
+                                }}
+                                style={{
+                                  padding: '0.5rem 1rem',
+                                  borderRadius: '4px',
+                                  border: 'none',
+                                  cursor: 'pointer',
+                                  fontSize: '0.875rem',
+                                  backgroundColor:
+                                    subStatus === '체험' ? '#8b5cf6' :
+                                    subStatus === '병결' ? '#ef4444' : '#6b7280',
+                                  color: 'white'
+                                }}
+                              >
+                                {subStatus}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
