@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './styles/globals.css';
+import { DebugSupabase } from './components/DebugSupabase';
+import { QuickPanel } from './components/QuickPanel';
 
 // 확장된 타입 정의
 interface Student {
@@ -511,8 +513,14 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f9fafb', fontFamily: 'system-ui, sans-serif' }}>
-      {/* 빠른 입력 패널 */}
-      {isQuickPanelOpen && (
+      {/* Supabase 연동 QuickPanel */}
+      <QuickPanel
+        isOpen={isQuickPanelOpen}
+        onClose={() => setIsQuickPanelOpen(false)}
+      />
+
+      {/* 기존 패널 (임시 비활성화) */}
+      {false && isQuickPanelOpen && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -819,6 +827,9 @@ export default function App() {
       >
         ⚡
       </button>
+
+      {/* 디버그 컴포넌트 */}
+      <DebugSupabase />
 
       {/* 하단 정보 */}
       <footer style={{
