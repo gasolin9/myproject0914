@@ -280,6 +280,117 @@ export class SupabaseAttendanceService {
     }
   }
 
+  /**
+   * 벌크 출결 기록 추가
+   */
+  static async addBulkAttendances(
+    inputs: CreateAttendanceInput[]
+  ): Promise<{ success: AttendanceEntry[]; failed: { input: CreateAttendanceInput; error: string }[] }> {
+    const success: AttendanceEntry[] = [];
+    const failed: { input: CreateAttendanceInput; error: string }[] = [];
+
+    for (const input of inputs) {
+      try {
+        const entry = await this.addAttendance(input);
+        success.push(entry);
+      } catch (error) {
+        failed.push({
+          input,
+          error: error instanceof Error ? error.message : '알 수 없는 오류'
+        });
+      }
+    }
+
+    // 벌크 작업 히스토리 로그
+    await this.addHistoryLog({
+      action: 'bulk_import',
+      entity_type: 'attendance',
+      entity_id: 'bulk',
+      changes: {
+        successCount: success.length,
+        failedCount: failed.length,
+        totalCount: inputs.length
+      }
+    });
+
+    return { success, failed };
+  }
+
+  /**
+   * 조퇴 시 후속 교시 자동 처리
+   */
+  static async handleEarlyLeave(
+    studentId: string,
+    date: string,
+    fromPeriod: number,
+    maxPeriods: number = 6,
+    reason?: string
+  ): Promise<AttendanceEntry[]> {
+    const results: AttendanceEntry[] = [];
+
+    for (let period = fromPeriod + 1; period <= maxPeriods; period++) {
+      const entry = await this.addAttendance({
+        studentId,
+        date,
+        period,
+        status: '조퇴',
+        reason: reason || `${fromPeriod}교시 조퇴로 인한 자동 처리`
+      });
+      results.push(entry);
+    }
+
+    return results;
+  }
+
+  /**
+   * 필터링된 출결 기록 조회
+   */
+  static async getFilteredAttendances(
+    filter: AttendanceFilter,
+    limit?: number,
+    offset?: number
+  ): Promise<{ attendances: AttendanceEntry[]; total: number }> {
+    try {
+      let query = supabase
+        .from('attendances')
+        .select('*', { count: 'exact' })
+        .order('date', { ascending: false });
+
+      // 날짜 필터
+      if (filter.dateFrom && filter.dateTo) {
+        query = query.gte('date', filter.dateFrom).lte('date', filter.dateTo);
+      }
+
+      // 교시 필터
+      if (filter.periods.length > 0) {
+        query = query.in('period', [...filter.periods, null]);
+      }
+
+      // 상태 필터
+      if (filter.statuses.length > 0) {
+        query = query.in('status', filter.statuses);
+      }
+
+      // 학생 필터
+      if (filter.students.length > 0) {
+        query = query.in('student_id', filter.students);
+      }
+
+      // 페이지네이션
+      if (offset) query = query.range(offset, offset + (limit || 50) - 1);
+      else if (limit) query = query.limit(limit);
+
+      const { data, error, count } = await query;
+      if (error) throw error;
+
+      const attendances = (data || []).map(this.convertToAttendanceEntry);
+      return { attendances, total: count || 0 };
+    } catch (error) {
+      console.error('출결 기록 조회 실패:', error);
+      throw new Error('출결 기록을 조회하는데 실패했습니다.');
+    }
+  }
+
   // ==============================================
   // Private 헬퍼 메서드들
   // ==============================================

@@ -9,8 +9,8 @@ import { toast } from 'react-hot-toast';
 import { clsx } from 'clsx';
 
 import { AttendanceStatus, Student, ATTENDANCE_STATUSES, STATUS_ICONS } from '../types';
-import { StudentService } from '../services/StudentService';
-import { AttendanceService } from '../services/AttendanceService';
+import { SupabaseStudentService } from '../services/SupabaseStudentService';
+import { SupabaseAttendanceService } from '../services/SupabaseAttendanceService';
 import { LoadingSpinner } from './ui/LoadingSpinner';
 
 interface QuickPanelProps {
@@ -93,7 +93,7 @@ export function QuickPanel({ isOpen, onClose }: QuickPanelProps) {
   const loadStudents = async () => {
     setIsLoading(true);
     try {
-      const studentList = await StudentService.getStudents({
+      const studentList = await SupabaseStudentService.getStudents({
         active: true,
         sortBy: 'number',
         sortOrder: 'asc'
@@ -133,7 +133,7 @@ export function QuickPanel({ isOpen, onClose }: QuickPanelProps) {
         reason: activeStatus === '지각' || activeStatus === '조퇴' ? `${selectedPeriod}교시` : undefined
       }));
 
-      const result = await AttendanceService.addBulkAttendances(attendanceInputs);
+      const result = await SupabaseAttendanceService.addBulkAttendances(attendanceInputs);
 
       if (result.success.length > 0) {
         toast.success(`${result.success.length}명의 출결이 저장되었습니다.`);
